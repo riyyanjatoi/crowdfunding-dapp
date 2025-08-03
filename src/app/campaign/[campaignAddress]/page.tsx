@@ -6,7 +6,7 @@ import { sepolia } from "thirdweb/chains";
 import { CAMPAIGN_ABI } from "../../constants/contracts"; 
 import { lightTheme, useActiveAccount, useReadContract } from "thirdweb/react";
 import TierCard from "../../components/TierCard";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { TransactionButton } from "thirdweb/react";
 import { prepareContractCall } from "thirdweb"
 
@@ -17,7 +17,21 @@ export default function CampaignPage() {
     const { campaignAddress } = useParams();
     const [isEditing, setIsEditing] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [isWithdrawn, setIsWithdrawn] = useState<boolean>(() => {
+        if (typeof window === 'undefined') return false;
+        return localStorage.getItem(`withdrawn_${campaignAddress}`) === 'true';
+    });
     
+    useEffect(() => {
+        function handler(e: StorageEvent) {
+            if (e.key === `withdrawn_${campaignAddress}`) {
+                setIsWithdrawn(e.newValue === 'true');
+            }
+        }
+        window.addEventListener('storage', handler);
+        return () => window.removeEventListener('storage', handler);
+    }, [campaignAddress]);
+
     const contract = getContract({
         client: client,
         chain: sepolia,
@@ -74,8 +88,7 @@ export default function CampaignPage() {
     };
 
     const balancePercentage = calculatePercentage();
-    const isDataLoading = isPendingName || isPendingDescription || isPendingGoal || isPendingDeadline || isPendingBalance;
-    
+
     const { data: tiers, isPending: isPendingTiers } = useReadContract({
     contract,
     method: "getTiers",
@@ -94,11 +107,37 @@ export default function CampaignPage() {
     params: [],
     });
 
+    // Successful if contract state enum == 1 (Successful) OR goal reached
+    const isCampaignSuccessful = (typeof state !== 'undefined' && Number(state) === 1) || balancePercentage >= 100;
+    const isCampaignWithdrawn = isCampaignSuccessful && isWithdrawn;
+
+    const isDataLoading = isPendingName || isPendingDescription || isPendingGoal || isPendingDeadline || isPendingBalance || isPendingTiers || isPendinOwner || isPendingState;
+    
+    const getStatusBadge = () => {
+        if (isCampaignWithdrawn) {
+            return (
+                <span className="inline-flex items-center space-x-1 ml-2">
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Completed</span>
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-200 text-yellow-800">
+                        Withdrawn
+                    </span>
+                </span>
+            );
+        }
+        if (isCampaignSuccessful) {
+            return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 ml-2">Completed</span>;
+        }
+        return null;
+    };
+
     return (
         <div className = "mx-auto max-w-7xl px-2 mt-4 sm:px-6 lg:px-8">
             <div className="flex flex-row justify-between items-center">
                 {!isPendingName && (
-                    <p className="text-4xl font-semibold">{campaignName}</p>
+                    <p className="text-4xl font-semibold flex items-center">
+                        {campaignName}
+                        {getStatusBadge()}
+                    </p>
                 )}
                 {owner === account?.address && (
                     <div className="flex flex-row">
@@ -123,12 +162,16 @@ export default function CampaignPage() {
                 <div className="mb-4">
                     <p className="text-lg font-semibold">Campaign Goal: ${goalAmount?.toString()}</p>
                     <div className="relative w-full h-6 bg-gray-200 rounded-full dark:bg-gray-700 mb-4">
-                        <div className="h-6 bg-green-600 rounded-full dark:bg-green-500 text-right" style={{ width: `${balancePercentage?.toString()}%`}}>
-                            <p className="text-white dark:text-white text-xs p-1">${balance?.toString()}</p>
+                        <div className="h-6 bg-green-600 rounded-full dark:bg-green-500 text-right" style={{ width: `${isCampaignSuccessful ? 100 : balancePercentage}%`}}>
+                            <p className="text-white dark:text-white text-xs p-1">
+                                {isCampaignSuccessful ? 'Completed' : `$${balance?.toString()}`}
+                            </p>
                         </div>
-                        <p className="absolute top-0 right-0 text-white dark:text-white text-xs p-1">
-                            {balancePercentage >= 100 ? "" : `${balancePercentage?.toString()}%`}
-                        </p>
+                        {!isCampaignSuccessful && balancePercentage < 100 && (
+                            <p className="absolute top-0 right-0 text-white dark:text-white text-xs p-1">
+                                {balancePercentage}%
+                            </p>
+                        )}
                     </div>
                 </div>
                 

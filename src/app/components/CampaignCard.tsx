@@ -15,6 +15,12 @@ type CampaignCardProps = {
     onHide?: (address: string) => void; // callback to hide campaign in dashboard
 };
 
+enum CampaignState {
+    Active,
+    Successful,
+    Failed
+}
+
 export default function CampaignCard({ campaignAddress, showAllCampaigns = false, onHide }: CampaignCardProps) {
     const descriptionRef = useRef<HTMLParagraphElement>(null);
     const [showSeeMore, setShowSeeMore] = useState(false);
@@ -66,6 +72,27 @@ export default function CampaignCard({ campaignAddress, showAllCampaigns = false
         params: [],
     });
 
+    const { data: campaignStatus } = useReadContract({
+        contract,
+        method: "getCampaignStatus",
+        params: [],
+    });
+
+    const [isWithdrawn, setIsWithdrawn] = useState<boolean>(() => {
+        if (typeof window === 'undefined') return false;
+        return localStorage.getItem(`withdrawn_${campaignAddress}`) === 'true';
+    });
+
+    useEffect(() => {
+        function handler(e: StorageEvent) {
+            if (e.key === `withdrawn_${campaignAddress}`) {
+                setIsWithdrawn(e.newValue === 'true');
+            }
+        }
+        window.addEventListener('storage', handler);
+        return () => window.removeEventListener('storage', handler);
+    }, [campaignAddress]);
+
     const calculatePercentage = () => {
         if (!balance || !goalAmount) {
             return 0; // Return 0 if data is not yet loaded
@@ -84,6 +111,16 @@ export default function CampaignCard({ campaignAddress, showAllCampaigns = false
     const balancePercentage = calculatePercentage();
     const isDataLoading = isPendingName || isPendingDescription || isPendingGoal || isPendingBalance || isPendingOwner || isPendingDeadline;
 
+    const enumStatus = Number(campaignStatus ?? CampaignState.Active) as CampaignState;
+    const isCampaignSuccessful = enumStatus === CampaignState.Successful;
+    const isCampaignFailed = enumStatus === CampaignState.Failed;
+
+    const isCampaignWithdrawn = isCampaignSuccessful && isWithdrawn;
+
+    const isCampaignActive = enumStatus === CampaignState.Active;
+
+    const isCampaignExpired = deadline && BigInt(deadline.toString()) < BigInt(Math.floor(Date.now() / 1000));
+
     // Check if description overflows one line
     useEffect(() => {
         if (descriptionRef.current && campaignDescription) {
@@ -96,25 +133,30 @@ export default function CampaignCard({ campaignAddress, showAllCampaigns = false
     // Check if current user is the owner
     const isOwner = account?.address && owner && account.address.toLowerCase() === owner.toLowerCase();
 
-    // Check campaign status
-    const isCampaignCompleted = balancePercentage >= 100;
-    const isCampaignExpired = deadline && BigInt(deadline.toString()) < BigInt(Math.floor(Date.now() / 1000));
-    const isCampaignActive = !isCampaignCompleted && !isCampaignExpired;
-
     // Show status badge
     const getStatusBadge = () => {
-        if (isCampaignCompleted) {
-            return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Completed</span>;
-        } else if (isCampaignExpired) {
-            return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">Expired</span>;
-        } else {
-            return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">Active</span>;
+        if (isCampaignWithdrawn) {
+            return (
+                <span className="inline-flex items-center space-x-1">
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Completed</span>
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-200 text-yellow-800">
+                        Withdrawn
+                    </span>
+                </span>
+            );
         }
+        if (isCampaignSuccessful) {
+            return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Completed</span>;
+        }
+        if (isCampaignFailed || isCampaignExpired) {
+            return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">Expired</span>;
+        }
+        return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">Active</span>;
     };
 
     // Handle campaign hide (completed or expired)
     const handleHideCampaign = () => {
-        if (!onHide || !(isCampaignCompleted || isCampaignExpired)) return;
+        if (!onHide || !(isCampaignExpired || isCampaignFailed || isCampaignWithdrawn)) return;
 
         if (!confirm("Hide this campaign from your dashboard? You can unhide it by clearing browser storage.")) {
             return;
@@ -127,7 +169,7 @@ export default function CampaignCard({ campaignAddress, showAllCampaigns = false
         }
     };
 
-    // Don't render the card if it's not active and we're not showing all campaigns
+    // Don't render the card on main page if campaign is not active
     if (!showAllCampaigns && !isCampaignActive) {
         return null;
     }
@@ -167,13 +209,13 @@ export default function CampaignCard({ campaignAddress, showAllCampaigns = false
                     <div>
                         <div className="mb-4">
                             <div className="relative w-full h-6 bg-gray-200 rounded-full dark:bg-gray-700">
-                                <div className="h-6 bg-green-600 rounded-full dark:bg-green-500 text-right" style={{ width: `${balancePercentage}%` }}>
+                                <div className="h-6 bg-green-600 rounded-full dark:bg-green-500 text-right" style={{ width: `${isCampaignSuccessful ? 100 : balancePercentage}%` }}>
                                     <span className="text-white text-xs font-semibold p-1">
-                                        {/* Display the balance inside the bar */}
-                                        {balance?.toString()}$
+                                        {/* Show Completed when goal reached */}
+                                        {isCampaignSuccessful ? 'Completed' : `${balance?.toString()}$`}
                                     </span>
                                 </div>
-                                {balancePercentage < 100 && (
+                                {(!isCampaignSuccessful && balancePercentage < 100) && (
                                     <p className="absolute top-0 right-2 text-gray-700 dark:text-white text-xs p-1 font-semibold">
                                         {balancePercentage}%
                                     </p>
@@ -197,7 +239,7 @@ export default function CampaignCard({ campaignAddress, showAllCampaigns = false
                             </Link>
                             
                             {/* Show hide button for expired or completed campaigns in dashboard (can't hide active) */}
-                            {showAllCampaigns && (isCampaignExpired || isCampaignCompleted) && onHide && (
+                            {showAllCampaigns && (isCampaignExpired || isCampaignFailed || isCampaignWithdrawn) && onHide && (
                                 <button
                                     onClick={handleHideCampaign}
                                     disabled={isHiding}

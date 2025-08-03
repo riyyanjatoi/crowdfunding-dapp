@@ -44,10 +44,11 @@ export default function CampaignWithdraw({ campaignAddress, compact = false }: C
     useEffect(() => {
         const fetchEthPrice = async () => {
             try {
-                const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd');
+                const response = await fetch('/api/eth-price');
+                if (!response.ok) throw new Error(`Status ${response.status}`);
                 const data = await response.json();
-                if (data.ethereum?.usd) {
-                    setEthPriceInUsd(data.ethereum.usd);
+                if (data.usd) {
+                    setEthPriceInUsd(data.usd);
                 }
             } catch (error) {
                 console.error("Failed to fetch ETH price:", error);
@@ -87,6 +88,16 @@ export default function CampaignWithdraw({ campaignAddress, compact = false }: C
             }}
             onTransactionConfirmed={() => {
                 alert("Withdrawal successful!");
+                // Persist withdrawn status locally so UI can hide this campaign from the active list
+                if (typeof window !== 'undefined') {
+                    try {
+                        localStorage.setItem(`withdrawn_${campaignAddress}`, 'true');
+                        // Broadcast so any open tabs/components can react immediately
+                        window.dispatchEvent(new StorageEvent('storage', { key: `withdrawn_${campaignAddress}`, newValue: 'true' }));
+                    } catch (e) {
+                        console.warn('Unable to write withdrawn flag to localStorage', e);
+                    }
+                }
                 refetchBalance();
             }}
             onError={(error) => {
