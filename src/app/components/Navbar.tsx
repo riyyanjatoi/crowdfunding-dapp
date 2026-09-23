@@ -18,7 +18,7 @@ const Navbar = () => {
             {/* Logo */}
             <Image
               src="/crowd-funding.png"
-              alt="Crowd Funding"
+              alt="Crowd Funding Dapp"
               width={50}
               height={50}
               style={{ filter: "drop-shadow(0px 0px 24px #a726a9a8)" }}
