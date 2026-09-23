@@ -24,6 +24,15 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Check thirdweb client ID
+        run: |
+          if [ -z "${{ secrets.NEXT_PUBLIC_THIRDWEB_CLIENT_ID }}" ]; then
+            echo "❌ Thirdweb client ID is NOT available"
+            exit 1
+          else
+            echo "✅ Thirdweb client ID is available"
+          fi
+
       - name: Build Docker image
         run: |
           docker build \
