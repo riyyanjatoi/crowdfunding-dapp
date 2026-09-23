@@ -18,6 +18,7 @@ COPY . .
 
 ARG NEXT_PUBLIC_THIRDWEB_CLIENT_ID
 ENV NEXT_PUBLIC_THIRDWEB_CLIENT_ID=$NEXT_PUBLIC_THIRDWEB_CLIENT_ID
+RUN test -n "$NEXT_PUBLIC_THIRDWEB_CLIENT_ID" && echo "Thirdweb client ID is available in Docker" || (echo "Thirdweb client ID is missing in Docker" && exit 1)
 
 RUN npm run build
 
