@@ -1,4 +1,13 @@
+# ============================================================
+# Crowdfunding DApp - CI/CD Pipeline
+# ============================================================
+
 name: Crowdfunding CI/CD
+
+# ============================================================
+# TRIGGER
+# Run the workflow whenever code is pushed to the main branch
+# ============================================================
 
 on:
   push:
@@ -10,9 +19,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      # ========================================================
+      # ======================= CI PART ========================
+      # ========================================================
+
+      # Step 1: Checkout the latest code from GitHub
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Step 2: Configure AWS credentials
+      # These credentials allow GitHub Actions to communicate
+      # with AWS services such as ECR.
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -20,10 +38,16 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: eu-north-1
 
+      # Step 3: Login to Amazon ECR
+      # This allows GitHub Actions to push the Docker image
+      # into our ECR repository.
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      # Step 4: Check that the Thirdweb client ID exists
+      # This prevents the Docker build from failing because
+      # the required environment variable is missing.
       - name: Check thirdweb client ID
         run: |
           if [ -z "${{ secrets.NEXT_PUBLIC_THIRDWEB_CLIENT_ID }}" ]; then
@@ -33,18 +57,68 @@ jobs:
             echo "✅ Thirdweb client ID is available"
           fi
 
+      # Step 5: Build the Docker image
+      # The Thirdweb client ID is passed into the Docker build
+      # as a build argument.
       - name: Build Docker image
         run: |
           docker build \
             --build-arg NEXT_PUBLIC_THIRDWEB_CLIENT_ID=${{ secrets.NEXT_PUBLIC_THIRDWEB_CLIENT_ID }} \
             -t crowdfunding-dapp .
 
+      # Step 6: Tag the Docker image
+      # The image is tagged using the ECR repository URI.
       - name: Tag Docker image
         run: |
           docker tag crowdfunding-dapp:latest \
             154560316043.dkr.ecr.eu-north-1.amazonaws.com/crowdfunding-dapp:latest
 
+      # Step 7: Push the Docker image to ECR
+      # This uploads the newly built image to Amazon ECR.
       - name: Push Docker image to ECR
         run: |
           docker push \
             154560316043.dkr.ecr.eu-north-1.amazonaws.com/crowdfunding-dapp:latest
+
+
+      # ========================================================
+      # ======================= CD PART ========================
+      # ========================================================
+
+      # Step 8: Connect to EC2 using SSH
+      # GitHub Actions connects to our EC2 instance using
+      # the private SSH key stored in GitHub Secrets.
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+
+          # Step 9: Execute deployment commands on EC2
+          script: |
+
+            # Login to Amazon ECR from EC2
+            # EC2 uses its IAM role to authenticate with ECR.
+            aws ecr get-login-password --region eu-north-1 | \
+              docker login --username AWS --password-stdin \
+              154560316043.dkr.ecr.eu-north-1.amazonaws.com
+
+            # Pull the latest Docker image from ECR
+            docker pull \
+              154560316043.dkr.ecr.eu-north-1.amazonaws.com/crowdfunding-dapp:latest
+
+            # Stop the currently running container
+            # "|| true" prevents the deployment from failing if
+            # the container does not exist.
+            docker stop crowdfunding-dapp || true
+
+            # Remove the old container
+            docker rm crowdfunding-dapp || true
+
+            # Start a new container using the latest image
+            docker run -d \
+              --name crowdfunding-dapp \
+              -p 3000:3000 \
+              154560316043.dkr.ecr.eu-north-1.amazonaws.com/crowdfunding-dapp:latest
+
